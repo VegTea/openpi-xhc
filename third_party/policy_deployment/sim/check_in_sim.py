@@ -304,37 +304,59 @@ def run_policy(model, data, viewer, qpos_addrs, ctrl_idxs, bundle, *,
     client = WebsocketPolicyClient(host=host, port=port, api_key=api_key)
     print(f"Connected to policy server at {host}:{port}")
 
-    images_top   = bundle["images"]["top_camera"]
-    images_left  = bundle["images"]["left_camera"]
-    images_right = bundle["images"]["right_camera"]
-    T = len(bundle["timestamps_ns"])
+    if "images" in bundle:
+        image_frames = [
+            {
+                "top_camera": top,
+                "left_camera": left,
+                "right_camera": right,
+            }
+            for top, left, right in zip(
+                bundle["images"]["top_camera"],
+                bundle["images"]["left_camera"],
+                bundle["images"]["right_camera"],
+            )
+        ]
+        T = len(bundle["timestamps_ns"])
+        max_steps = T
+        print("Policy input: using per-frame images from bundle['images']")
+    elif "samples" in bundle:
+        image_frames = [sample["images"] for sample in bundle["samples"]]
+        T = len(image_frames)
+        max_steps = T * action_horizon
+        print("Policy input: using slim-bundle sample images")
+    else:
+        raise KeyError("Policy mode requires either bundle['images'] or slim-bundle 'samples'")
 
     sim_dt = model.opt.timestep
     ctrl_dt = 1.0 / ctrl_hz
     inner_steps = max(1, int(round(ctrl_dt / sim_dt)))
-    print(f"Policy: T={T}  ctrl_hz={ctrl_hz:.1f}  "
+    print(f"Policy: T={T}  max_steps={max_steps}  ctrl_hz={ctrl_hz:.1f}  "
           f"sim_dt={sim_dt:.4f}s  inner_steps={inner_steps}  realtime={realtime}")
 
     t_wall0 = time.perf_counter()
     k = 0
-    while viewer.is_running() and k < T:
+    frame_idx = 0
+    while viewer.is_running() and k < max_steps and frame_idx < T:
         # ---- obs at frame k (mcap JPEG for vision, sim qpos for state) ----
+        images = image_frames[frame_idx]
         state14 = read_state14(qpos_addrs, data).astype(np.float64)
         policy_input = {
             "images": {
-                "cam_high":        jpeg_to_chw(images_top[k]),
-                "cam_left_wrist":  jpeg_to_chw(images_left[k]),
-                "cam_right_wrist": jpeg_to_chw(images_right[k]),
+                "cam_high":        jpeg_to_chw(images["top_camera"]),
+                "cam_left_wrist":  jpeg_to_chw(images["left_camera"]),
+                "cam_right_wrist": jpeg_to_chw(images["right_camera"]),
             },
             "state":  np.ascontiguousarray(state14),
             "prompt": prompt,
         }
         chunk = np.asarray(client.infer(policy_input)["actions"])  # (H, 14)
         H = min(action_horizon, len(chunk))
-        print(f"frame {k:4d}/{T}  policy returned {len(chunk)} actions, executing {H}")
+        print(f"frame {k:4d}/{max_steps}  image {frame_idx:4d}/{T}  "
+              f"policy returned {len(chunk)} actions, executing {H}")
 
         for h in range(H):
-            if not viewer.is_running() or k >= T:
+            if not viewer.is_running() or k >= max_steps:
                 break
             if realtime:
                 target_wall = t_wall0 + (k * ctrl_dt) / max(speed, 1e-6)
@@ -346,6 +368,7 @@ def run_policy(model, data, viewer, qpos_addrs, ctrl_idxs, bundle, *,
                 mujoco.mj_step(model, data)
             viewer.sync()
             k += 1
+        frame_idx += H if "images" in bundle else 1
     print("Policy run done.")
 
 

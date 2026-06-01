@@ -280,7 +280,97 @@ execute action chunk in MuJoCo dynamics
 print L2 / max error metrics
 ```
 
-## 9. CPU 与 4090/GPU 机器的差别
+## 9. 从 Expert Data 导出自己的 Bundle
+
+`policy_deployment` 的 sim 使用 `.pkl` bundle 作为输入。当前仓库提供了导出脚本：
+
+```text
+scripts/export_policy_deployment_bundle.py
+```
+
+它会从 LeRobot 格式的 `expert-data` 里读取：
+
+```text
+data/chunk-xxx/episode_xxxxxx.parquet
+videos/chunk-xxx/observation.images.cam_high/episode_xxxxxx.mp4
+videos/chunk-xxx/observation.images.cam_left_wrist/episode_xxxxxx.mp4
+videos/chunk-xxx/observation.images.cam_right_wrist/episode_xxxxxx.mp4
+```
+
+并生成一个同时支持 `replay`、`policy`、`compare` 的 pkl，包含：
+
+```text
+actions
+joint_positions
+timestamps_ns
+images
+samples
+meta
+```
+
+导出一条完整轨迹，例如 episode 0：
+
+```bash
+cd /inspire/ssd/project/gjjproject/czxs24230043/openpi-xhc
+
+PYTHONPATH=$PWD \
+uv run python scripts/export_policy_deployment_bundle.py \
+  --dataset-root /inspire/qb-ilm/project/gjjproject/public/xl/data/rss_challenge/raw/tower-of-hanoi-game/expert-data \
+  --episode-index 0 \
+  --output out/bundles/tower_episode_000000.pkl \
+  --num-samples 10 \
+  --action-horizon 50
+```
+
+如果只是快速测试导出流程，可以限制帧数：
+
+```bash
+PYTHONPATH=$PWD \
+uv run python scripts/export_policy_deployment_bundle.py \
+  --dataset-root /inspire/qb-ilm/project/gjjproject/public/xl/data/rss_challenge/raw/tower-of-hanoi-game/expert-data \
+  --episode-index 0 \
+  --output out/bundles/tower_episode_000000_120f.pkl \
+  --max-frames 120 \
+  --num-samples 3 \
+  --action-horizon 50
+```
+
+导出后可以直接 replay：
+
+```bash
+PYTHONPATH=$PWD/third_party/policy_deployment:$PWD \
+MUJOCO_GL=osmesa \
+uv run python third_party/policy_deployment/sim/check_in_sim.py \
+  --mode replay \
+  --bundle out/bundles/tower_episode_000000.pkl \
+  --scene third_party/policy_deployment/sim/assets/robot_models/arm/dual_yam/dual_yam_bimanual.xml \
+  --output out/bundles/tower_episode_000000_replay.mp4 \
+  --render-camera front \
+  --fps 30
+```
+
+或者用同一个 bundle 做 policy rollout：
+
+```bash
+PYTHONPATH=$PWD/third_party/policy_deployment:$PWD \
+MUJOCO_GL=osmesa \
+uv run python third_party/policy_deployment/sim/check_in_sim.py \
+  --mode policy \
+  --bundle out/bundles/tower_episode_000000.pkl \
+  --scene third_party/policy_deployment/sim/assets/robot_models/arm/dual_yam/dual_yam_bimanual.xml \
+  --host 127.0.0.1 \
+  --port 8010 \
+  --prompt "play the tower of hanoi game" \
+  --action-horizon 50 \
+  --output out/bundles/tower_episode_000000_policy.mp4 \
+  --render-camera front \
+  --fps 30
+```
+
+注意：完整 episode 会把三路视频逐帧编码进 pkl，文件可能较大。`--max-frames`
+适合调试，正式测试时去掉它。
+
+## 10. CPU 与 4090/GPU 机器的差别
 
 当前 CPU 节点可以完整跑通部署、推理、sim 和 mp4 渲染，但 `pi05` 推理较慢。
 实测 CPU 单次 WebSocket inference 是秒级到十秒级。
@@ -300,7 +390,7 @@ PY
 
 如果看到 `cpu`，说明策略仍然在 CPU 上跑；如果看到 GPU/CUDA device，才是真正用到了 4090。
 
-## 10. 常见问题
+## 11. 常见问题
 
 ### `apt-get update` 访问 nexus 报 502
 
@@ -363,7 +453,7 @@ checkpoint_dir=.../pi05_tower-of-hanoi-game_with_val_loss_2h200/40000
 
 sim、ping、smoke test 里的 `--port` 也要同步改成 `8011`。
 
-## 11. 已验证输出
+## 12. 已验证输出
 
 当前机器已验证生成：
 
