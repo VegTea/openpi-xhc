@@ -565,6 +565,12 @@ class TrainConfig:
 
     # How often (in steps) to log training metrics.
     log_interval: int = 100
+    # Fraction of the dataset to hold out for validation. Set to 0 to disable validation.
+    val_split_fraction: float = 0.0
+    # How often (in steps) to run validation. If None, uses log_interval.
+    val_interval: int | None = None
+    # Number of validation batches to average for each validation log.
+    val_num_batches: int = 10
     # How often (in steps) to save checkpoints.
     save_interval: int = 1000
     # If set, any existing checkpoints matching step % keep_period == 0 will not be deleted.
@@ -607,6 +613,10 @@ class TrainConfig:
     def __post_init__(self) -> None:
         if self.resume and self.overwrite:
             raise ValueError("Cannot resume and overwrite at the same time.")
+        if not 0.0 <= self.val_split_fraction < 1.0:
+            raise ValueError("val_split_fraction must be in [0.0, 1.0).")
+        if self.val_num_batches <= 0:
+            raise ValueError("val_num_batches must be positive.")
 
 
 # Use `get_config` if you need to get a config by name in your code.
@@ -647,15 +657,65 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(pi05=True),
         data=DualYamDataConfig(
             repo_id="tower-of-hanoi-game/expert-data",
-            base_config=DataConfig(prompt_from_task=True,  local_files_path="/Your/path/to/Posttraining-RFM-RSS2026/Challenge-phase1-dataset/tower-of-hanoi-game/expert-data"),
+            base_config=DataConfig(prompt_from_task=True,  local_files_path="/inspire/ssd/project/gjjproject/czxs24230043/Challenge-phase1-dataset/tower-of-hanoi-game/expert-data"),
             use_delta_joint_actions=True,
             adapt_to_pi=True
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"),
         num_train_steps=200_000,
         batch_size=32,
         num_workers=64,
         save_interval=40_000
+    ),
+    TrainConfig(
+        name="pi05_tower-of-hanoi-game_with_val_loss",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=DualYamDataConfig(
+            repo_id="tower-of-hanoi-game/expert-data",
+            base_config=DataConfig(
+                prompt_from_task=True,
+                local_files_path="/inspire/qb-ilm/project/gjjproject/public/xl/data/rss_challenge/raw/tower-of-hanoi-game/expert-data",
+            ),
+            use_delta_joint_actions=True,
+            adapt_to_pi=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"
+        ),
+        num_train_steps=200_000,
+        batch_size=32,
+        num_workers=64,
+        log_interval=100,
+        val_split_fraction=0.1,
+        val_interval=1000,
+        val_num_batches=10,
+        save_interval=40_000,
+    ),
+    TrainConfig(
+        name="pi05_tower-of-hanoi-game_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=DualYamDataConfig(
+            repo_id="tower-of-hanoi-game/expert-data",
+            base_config=DataConfig(prompt_from_task=True,  local_files_path="/inspire/ssd/project/gjjproject/czxs24230043/Challenge-phase1-dataset/tower-of-hanoi-game/expert-data"),
+            use_delta_joint_actions=True,
+            adapt_to_pi=True
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"),
+        num_train_steps=200_000,
+        batch_size=32,
+        num_workers=4,
+        save_interval=40_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
     ),
     #
     # Inference Aloha configs.

@@ -1,5 +1,6 @@
 import dataclasses
 import functools
+import itertools
 import logging
 import platform
 from typing import Any
@@ -191,6 +192,21 @@ def train_step(
     return new_state, info
 
 
+@at.typecheck
+def val_step(
+    rng: at.KeyArrayLike,
+    state: training_utils.TrainState,
+    batch: tuple[_model.Observation, _model.Actions],
+) -> dict[str, at.Array]:
+    model = nnx.merge(state.model_def, state.params)
+    model.eval()
+
+    observation, actions = batch
+    val_rng = jax.random.fold_in(rng, state.step)
+    chunked_loss = model.compute_loss(val_rng, observation, actions, train=False)
+    return {"val_loss": jnp.mean(chunked_loss)}
+
+
 def main(config: _config.TrainConfig):
     init_logging()
     logging.info(f"Running on: {platform.node()}")
@@ -216,15 +232,33 @@ def main(config: _config.TrainConfig):
         resume=config.resume,
     )
     init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
+    val_split_fraction = getattr(config, "val_split_fraction", 0.0)
+    val_interval = getattr(config, "val_interval", None) or config.log_interval
+    val_num_batches = getattr(config, "val_num_batches", 10)
 
+    train_loader_kwargs = {"split": "train"} if val_split_fraction > 0 else {}
     data_loader = _data_loader.create_data_loader(
         config,
         sharding=data_sharding,
         shuffle=True,
+        **train_loader_kwargs,
     )
     data_iter = iter(data_loader)
     batch = next(data_iter)
     logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
+
+    val_iter = None
+    if val_split_fraction > 0:
+        val_loader = _data_loader.create_data_loader(
+            config,
+            sharding=data_sharding,
+            shuffle=False,
+            split="val",
+        )
+        val_iter = iter(val_loader)
+        val_batch = next(val_iter)
+        logging.info(f"Initialized validation data loader:\n{training_utils.array_tree_to_info(val_batch)}")
+        val_iter = itertools.chain([val_batch], val_iter)
 
     # Log images from first batch to sanity check.
     images_to_log = [
@@ -245,6 +279,11 @@ def main(config: _config.TrainConfig):
         in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
         out_shardings=(train_state_sharding, replicated_sharding),
         donate_argnums=(1,),
+    )
+    pval_step = jax.jit(
+        val_step,
+        in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+        out_shardings=replicated_sharding,
     )
 
     start_step = int(train_state.step)
@@ -267,6 +306,17 @@ def main(config: _config.TrainConfig):
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
             infos = []
+
+        if val_iter is not None and step % val_interval == 0:
+            val_infos = []
+            with sharding.set_mesh(mesh):
+                for _ in range(val_num_batches):
+                    val_infos.append(pval_step(train_rng, train_state, next(val_iter)))
+            stacked_val_infos = common_utils.stack_forest(val_infos)
+            reduced_val_info = jax.device_get(jax.tree.map(jnp.mean, stacked_val_infos))
+            val_info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_val_info.items())
+            pbar.write(f"Step {step}: {val_info_str}")
+            wandb.log(reduced_val_info, step=step)
         batch = next(data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:

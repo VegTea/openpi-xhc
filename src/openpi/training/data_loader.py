@@ -62,6 +62,18 @@ class TransformedDataset(Dataset[T_co]):
         return len(self._dataset)
 
 
+class IndexSubset(Dataset[T_co]):
+    def __init__(self, dataset: Dataset[T_co], indices: torch.Tensor):
+        self._dataset = dataset
+        self.indices = indices.to(dtype=torch.long)
+
+    def __getitem__(self, index: SupportsIndex) -> T_co:
+        return self._dataset[int(self.indices[index.__index__()])]
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+
 class IterableTransformedDataset(IterableDataset[T_co]):
     def __init__(
         self,
@@ -192,6 +204,99 @@ def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip
     )
 
 
+def _unwrap_dataset(dataset: Dataset) -> Dataset:
+    while isinstance(dataset, TransformedDataset):
+        dataset = dataset._dataset  # noqa: SLF001
+    return dataset
+
+
+def _split_torch_dataset_by_episode(
+    dataset: Dataset[T_co],
+    *,
+    split: Literal["train", "val"],
+    val_split_fraction: float,
+    seed: int,
+) -> Dataset[T_co] | None:
+    base_dataset = _unwrap_dataset(dataset)
+    episode_data_index = getattr(base_dataset, "episode_data_index", None)
+    num_episodes = getattr(base_dataset, "num_episodes", None)
+    if episode_data_index is None or num_episodes is None:
+        return None
+
+    val_num_episodes = max(1, int(num_episodes * val_split_fraction))
+    train_num_episodes = num_episodes - val_num_episodes
+    if train_num_episodes <= 0:
+        raise ValueError(
+            f"Validation split leaves no training episodes: num_episodes={num_episodes}, "
+            f"val_split_fraction={val_split_fraction}."
+        )
+
+    generator = torch.Generator().manual_seed(seed)
+    shuffled_episodes = torch.randperm(num_episodes, generator=generator)
+    val_episodes = torch.sort(shuffled_episodes[:val_num_episodes]).values
+    train_episodes = torch.sort(shuffled_episodes[val_num_episodes:]).values
+    selected_episodes = train_episodes if split == "train" else val_episodes
+
+    starts = episode_data_index["from"][selected_episodes].to(dtype=torch.long)
+    ends = episode_data_index["to"][selected_episodes].to(dtype=torch.long)
+    frame_indices = torch.cat(
+        [torch.arange(int(start), int(end), dtype=torch.long) for start, end in zip(starts, ends, strict=True)]
+    )
+
+    logging.info(
+        "Using %s episode split: train_episodes=%d, val_episodes=%d, train_frames=%d, val_frames=%d, "
+        "val_split_fraction=%.4f",
+        split,
+        len(train_episodes),
+        len(val_episodes),
+        int((episode_data_index["to"][train_episodes] - episode_data_index["from"][train_episodes]).sum()),
+        int((episode_data_index["to"][val_episodes] - episode_data_index["from"][val_episodes]).sum()),
+        val_split_fraction,
+    )
+    return IndexSubset(dataset, frame_indices)
+
+
+def split_torch_dataset(
+    dataset: Dataset[T_co],
+    *,
+    split: Literal["train", "val"],
+    val_split_fraction: float,
+    seed: int,
+) -> Dataset[T_co]:
+    if not 0.0 < val_split_fraction < 1.0:
+        raise ValueError("A train/val split was requested, but val_split_fraction is not in (0.0, 1.0).")
+
+    episode_split = _split_torch_dataset_by_episode(
+        dataset,
+        split=split,
+        val_split_fraction=val_split_fraction,
+        seed=seed,
+    )
+    if episode_split is not None:
+        return episode_split
+
+    val_size = max(1, int(len(dataset) * val_split_fraction))
+    train_size = len(dataset) - val_size
+    if train_size <= 0:
+        raise ValueError(
+            f"Validation split leaves no training samples: len(dataset)={len(dataset)}, "
+            f"val_split_fraction={val_split_fraction}."
+        )
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        typing.cast(torch.utils.data.Dataset, dataset),
+        [train_size, val_size],
+        generator=torch.Generator().manual_seed(seed),
+    )
+    logging.info(
+        "Using %s sample split: train_size=%d, val_size=%d, val_split_fraction=%.4f",
+        split,
+        train_size,
+        val_size,
+        val_split_fraction,
+    )
+    return train_dataset if split == "train" else val_dataset
+
+
 def transform_iterable_dataset(
     dataset: IterableDataset,
     data_config: _config.DataConfig,
@@ -229,6 +334,7 @@ def create_data_loader(
     num_batches: int | None = None,
     skip_norm_stats: bool = False,
     framework: Literal["jax", "pytorch"] = "jax",
+    split: Literal["train", "val"] | None = None,
 ) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
     """Create a data loader for training.
 
@@ -239,6 +345,7 @@ def create_data_loader(
         num_batches: Determines the number of batches to return.
         skip_norm_stats: Whether to skip data normalization.
         framework: The framework to use ("jax" or "pytorch").
+        split: If set, use the train or validation subset according to config.val_split_fraction.
     """
     data_config = config.data.create(config.assets_dirs, config.model)
     logging.info(f"data_config: {data_config}")
@@ -266,6 +373,8 @@ def create_data_loader(
         seed=config.seed,
         skip_norm_stats=skip_norm_stats,
         framework=framework,
+        split=split,
+        val_split_fraction=getattr(config, "val_split_fraction", 0.0),
     )
 
 
@@ -282,6 +391,8 @@ def create_torch_data_loader(
     num_workers: int = 0,
     seed: int = 0,
     framework: str = "jax",
+    split: Literal["train", "val"] | None = None,
+    val_split_fraction: float = 0.0,
 ) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
     """Create a data loader for training.
 
@@ -299,8 +410,17 @@ def create_torch_data_loader(
         num_workers: The number of worker processes to use. If zero, the data loader will
             execute in the main process.
         seed: The seed to use for shuffling the data.
+        split: If set, use the train or validation subset according to config.val_split_fraction.
+        val_split_fraction: Fraction of the dataset to hold out for validation.
     """
     dataset = create_torch_dataset(data_config, action_horizon, model_config)
+    if split is not None:
+        dataset = split_torch_dataset(
+            dataset,
+            split=split,
+            val_split_fraction=val_split_fraction,
+            seed=seed,
+        )
     dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
 
     # Use TorchDataLoader for both frameworks

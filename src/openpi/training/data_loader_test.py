@@ -1,6 +1,7 @@
 import dataclasses
 
 import jax
+import torch
 
 from openpi.models import pi0_config
 from openpi.training import config as _config
@@ -32,6 +33,42 @@ def test_torch_data_loader_infinite():
 
     for _ in range(10):
         _ = next(data_iter)
+
+
+class EpisodeDataset:
+    def __init__(self, episode_lengths: list[int]):
+        starts = []
+        ends = []
+        cursor = 0
+        self._episode_index = []
+        for episode_index, episode_length in enumerate(episode_lengths):
+            starts.append(cursor)
+            cursor += episode_length
+            ends.append(cursor)
+            self._episode_index.extend([episode_index] * episode_length)
+        self.episode_data_index = {"from": torch.tensor(starts), "to": torch.tensor(ends)}
+        self.num_episodes = len(episode_lengths)
+
+    def __getitem__(self, index):
+        return {"episode_index": self._episode_index[index]}
+
+    def __len__(self):
+        return len(self._episode_index)
+
+
+def test_split_torch_dataset_uses_disjoint_episodes():
+    dataset = EpisodeDataset([3, 2, 4, 5, 1])
+
+    train_dataset = _data_loader.split_torch_dataset(dataset, split="train", val_split_fraction=0.4, seed=0)
+    val_dataset = _data_loader.split_torch_dataset(dataset, split="val", val_split_fraction=0.4, seed=0)
+
+    train_indices = set(train_dataset.indices.tolist())
+    val_indices = set(val_dataset.indices.tolist())
+    assert train_indices.isdisjoint(val_indices)
+
+    train_episodes = {train_dataset[i]["episode_index"] for i in range(len(train_dataset))}
+    val_episodes = {val_dataset[i]["episode_index"] for i in range(len(val_dataset))}
+    assert train_episodes.isdisjoint(val_episodes)
 
 
 def test_torch_data_loader_parallel():

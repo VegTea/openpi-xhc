@@ -27,11 +27,20 @@ def create_torch_dataloader(
     batch_size: int,
     model_config: _model.BaseModelConfig,
     num_workers: int,
+    val_split_fraction: float = 0.0,
+    seed: int = 0,
     max_frames: int | None = None,
 ) -> tuple[_data_loader.Dataset, int]:
     if data_config.repo_id is None:
         raise ValueError("Data config must have a repo_id")
     dataset = _data_loader.create_torch_dataset(data_config, action_horizon, model_config)
+    if val_split_fraction > 0:
+        dataset = _data_loader.split_torch_dataset(
+            dataset,
+            split="train",
+            val_split_fraction=val_split_fraction,
+            seed=seed,
+        )
     dataset = _data_loader.TransformedDataset(
         dataset,
         [
@@ -96,7 +105,14 @@ def main(config_name: str, max_frames: int | None = None):
         )
     else:
         data_loader, num_batches = create_torch_dataloader(
-            data_config, config.model.action_horizon, config.batch_size, config.model, config.num_workers, max_frames
+            data_config,
+            config.model.action_horizon,
+            config.batch_size,
+            config.model,
+            config.num_workers,
+            config.val_split_fraction,
+            config.seed,
+            max_frames,
         )
 
     keys = ["state", "actions"]
