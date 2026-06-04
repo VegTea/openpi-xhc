@@ -571,6 +571,14 @@ class TrainConfig:
     val_interval: int | None = None
     # Number of validation batches to average for each validation log.
     val_num_batches: int = 10
+    # How often (in steps) to compare sampled actions against held-out dataset actions. Set to None to disable.
+    action_val_interval: int | None = None
+    # Number of validation batches to sample actions for each action validation log.
+    action_val_num_batches: int = 4
+    # Number of denoising steps used by model.sample_actions during action validation.
+    action_val_num_steps: int = 10
+    # Number of leading action dimensions to compare. For YAM this is the real 14-dim robot action.
+    action_val_action_dim: int = 14
     # How often (in steps) to save checkpoints.
     save_interval: int = 1000
     # If set, any existing checkpoints matching step % keep_period == 0 will not be deleted.
@@ -617,6 +625,14 @@ class TrainConfig:
             raise ValueError("val_split_fraction must be in [0.0, 1.0).")
         if self.val_num_batches <= 0:
             raise ValueError("val_num_batches must be positive.")
+        if self.action_val_interval is not None and self.action_val_interval <= 0:
+            raise ValueError("action_val_interval must be positive or None.")
+        if self.action_val_num_batches <= 0:
+            raise ValueError("action_val_num_batches must be positive.")
+        if self.action_val_num_steps <= 0:
+            raise ValueError("action_val_num_steps must be positive.")
+        if self.action_val_action_dim <= 0:
+            raise ValueError("action_val_action_dim must be positive.")
 
 
 # Use `get_config` if you need to get a config by name in your code.
@@ -633,10 +649,31 @@ _CONFIGS = [
         ),
         # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         weight_loader=weight_loaders.CheckpointWeightLoader("/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"),
-        num_train_steps=80_000, # 200k is about 3 epochs.
+        num_train_steps=200_000, # 200k is about 3 epochs.
         batch_size=32,
         num_workers=64,
         save_interval=40_000
+    ),
+    TrainConfig(
+        name="pi05_insert-mouse-battery_mixed",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=DualYamDataConfig(
+            repo_id="insert-mouse-battery/expert-success-hil-suffix-mix-data",
+            base_config=DataConfig(
+                prompt_from_task=True,
+                local_files_path="/inspire/qb-ilm/project/gjjproject/public/xl/data/rss_challenge/raw/insert-mouse-battery/expert-success-hil-suffix-mix-data",
+            ),
+            use_delta_joint_actions=True,
+            adapt_to_pi=True,
+        ),
+        # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"
+        ),
+        num_train_steps=200_000,
+        batch_size=32,
+        num_workers=64,
+        save_interval=40_000,
     ),
     TrainConfig(
         name="pi05_seal-water-bottle-cap",
@@ -649,10 +686,31 @@ _CONFIGS = [
         ),
         # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         weight_loader=weight_loaders.CheckpointWeightLoader("/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"),
-        num_train_steps=80_000,
+        num_train_steps=200_000,
         batch_size=32,
         num_workers=64,
         save_interval=40_000
+    ),
+    TrainConfig(
+        name="pi05_seal-water-bottle-cap_mixed",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=DualYamDataConfig(
+            repo_id="seal-water-bottle-cap/expert-success-hil-suffix-mix-data",
+            base_config=DataConfig(
+                prompt_from_task=True,
+                local_files_path="/inspire/qb-ilm/project/gjjproject/public/xl/data/rss_challenge/raw/seal-water-bottle-cap/expert-success-hil-suffix-mix-data",
+            ),
+            use_delta_joint_actions=True,
+            adapt_to_pi=True,
+        ),
+        # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"
+        ),
+        num_train_steps=200_000,
+        batch_size=32,
+        num_workers=64,
+        save_interval=40_000,
     ),
     TrainConfig(
         name="pi05_tower-of-hanoi-game",
@@ -665,10 +723,31 @@ _CONFIGS = [
         ),
         # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         weight_loader=weight_loaders.CheckpointWeightLoader("/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"),
-        num_train_steps=80_000,
+        num_train_steps=200_000,
         batch_size=32,
         num_workers=64,
         save_interval=40_000
+    ),
+    TrainConfig(
+        name="pi05_tower-of-hanoi-game_mixed",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=DualYamDataConfig(
+            repo_id="tower-of-hanoi-game/expert-success-hil-suffix-mix-data",
+            base_config=DataConfig(
+                prompt_from_task=True,
+                local_files_path="/inspire/qb-ilm/project/gjjproject/public/xl/data/rss_challenge/raw/tower-of-hanoi-game/expert-success-hil-suffix-mix-data",
+            ),
+            use_delta_joint_actions=True,
+            adapt_to_pi=True,
+        ),
+        # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"
+        ),
+        num_train_steps=200_000,
+        batch_size=32,
+        num_workers=64,
+        save_interval=40_000,
     ),
     TrainConfig(
         name="pi05_tower-of-hanoi-game_with_val_loss",
