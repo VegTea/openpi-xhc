@@ -627,12 +627,13 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(pi05=True),
         data=DualYamDataConfig(
             repo_id="insert-mouse-battery/expert-data",
-            base_config=DataConfig(prompt_from_task=True,  local_files_path="/Your/path/to/Posttraining-RFM-RSS2026/Challenge-phase1-dataset/insert-mouse-battery/expert-data"),
+            base_config=DataConfig(prompt_from_task=True,  local_files_path="/inspire/qb-ilm/project/gjjproject/public/xl/data/rss_challenge/raw/insert-mouse-battery/expert-data"),
             use_delta_joint_actions=True,
             adapt_to_pi=True
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        num_train_steps=200_000, # 200k is about 3 epochs.
+        # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"),
+        num_train_steps=80_000, # 200k is about 3 epochs.
         batch_size=32,
         num_workers=64,
         save_interval=40_000
@@ -642,12 +643,13 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(pi05=True),
         data=DualYamDataConfig(
             repo_id="seal-water-bottle-cap/expert-data",
-            base_config=DataConfig(prompt_from_task=True,  local_files_path="/Your/path/to/Posttraining-RFM-RSS2026/Challenge-phase1-dataset/seal-water-bottle-cap/expert-data"),
+            base_config=DataConfig(prompt_from_task=True,  local_files_path="/inspire/qb-ilm/project/gjjproject/public/xl/data/rss_challenge/raw/seal-water-bottle-cap/expert-data"),
             use_delta_joint_actions=True,
             adapt_to_pi=True
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        num_train_steps=200_000,
+        # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"),
+        num_train_steps=80_000,
         batch_size=32,
         num_workers=64,
         save_interval=40_000
@@ -657,13 +659,13 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(pi05=True),
         data=DualYamDataConfig(
             repo_id="tower-of-hanoi-game/expert-data",
-            base_config=DataConfig(prompt_from_task=True,  local_files_path="/inspire/ssd/project/gjjproject/czxs24230043/Challenge-phase1-dataset/tower-of-hanoi-game/expert-data"),
+            base_config=DataConfig(prompt_from_task=True,  local_files_path="/inspire/qb-ilm/project/gjjproject/public/xl/data/rss_challenge/raw/tower-of-hanoi-game/expert-data"),
             use_delta_joint_actions=True,
             adapt_to_pi=True
         ),
         # weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         weight_loader=weight_loaders.CheckpointWeightLoader("/inspire/ssd/project/gjjproject/czxs24230043/openpi_cache/checkpoints/pi05_base/params"),
-        num_train_steps=200_000,
+        num_train_steps=80_000,
         batch_size=32,
         num_workers=64,
         save_interval=40_000
