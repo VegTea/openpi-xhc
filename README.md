@@ -1,3 +1,9 @@
+deploy在`deployment/`, `third_party/policy_deployment`
+
+使用方法看`docs/policy_deployment_sim.md`
+
+---
+
 # RSS2026 Workshop Baseline Guidance
 
 This repository is the baseline for the RSS 2026 Post-Training for Robot Foundation Models workshop challenge. The three challenge tasks are pre-registered as training configs:
