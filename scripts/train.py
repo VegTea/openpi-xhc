@@ -207,6 +207,37 @@ def val_step(
     return {"val_loss": jnp.mean(chunked_loss)}
 
 
+@at.typecheck
+def action_val_step(
+    rng: at.KeyArrayLike,
+    state: training_utils.TrainState,
+    batch: tuple[_model.Observation, _model.Actions],
+    *,
+    num_steps: int,
+    action_dim: int,
+) -> dict[str, at.Array]:
+    model = nnx.merge(state.model_def, state.params)
+    model.eval()
+
+    observation, target_actions = batch
+    val_rng = jax.random.fold_in(rng, state.step)
+    pred_actions = model.sample_actions(val_rng, observation, num_steps=num_steps)
+
+    compare_dim = min(action_dim, pred_actions.shape[-1], target_actions.shape[-1])
+    diff = pred_actions[..., :compare_dim] - target_actions[..., :compare_dim]
+    abs_diff = jnp.abs(diff)
+    per_timestep_l2 = jnp.linalg.norm(diff, axis=-1)
+    per_chunk_l2 = jnp.linalg.norm(diff.reshape(diff.shape[0], -1), axis=-1)
+
+    return {
+        "action_val/l2": jnp.mean(per_timestep_l2),
+        "action_val/chunk_l2": jnp.mean(per_chunk_l2),
+        "action_val/mae": jnp.mean(abs_diff),
+        "action_val/mse": jnp.mean(jnp.square(diff)),
+        "action_val/max_abs": jnp.mean(jnp.max(abs_diff, axis=(-2, -1))),
+    }
+
+
 def main(config: _config.TrainConfig):
     init_logging()
     logging.info(f"Running on: {platform.node()}")
@@ -235,6 +266,12 @@ def main(config: _config.TrainConfig):
     val_split_fraction = getattr(config, "val_split_fraction", 0.0)
     val_interval = getattr(config, "val_interval", None) or config.log_interval
     val_num_batches = getattr(config, "val_num_batches", 10)
+    action_val_interval = getattr(config, "action_val_interval", None)
+    action_val_num_batches = getattr(config, "action_val_num_batches", 4)
+    action_val_num_steps = getattr(config, "action_val_num_steps", 10)
+    action_val_action_dim = getattr(config, "action_val_action_dim", config.model.action_dim)
+    if action_val_interval is not None and val_split_fraction <= 0:
+        raise ValueError("action_val_interval requires val_split_fraction > 0.")
 
     train_loader_kwargs = {"split": "train"} if val_split_fraction > 0 else {}
     data_loader = _data_loader.create_data_loader(
@@ -285,6 +322,11 @@ def main(config: _config.TrainConfig):
         in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
         out_shardings=replicated_sharding,
     )
+    paction_val_step = jax.jit(
+        functools.partial(action_val_step, num_steps=action_val_num_steps, action_dim=action_val_action_dim),
+        in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+        out_shardings=replicated_sharding,
+    )
 
     start_step = int(train_state.step)
     pbar = tqdm.tqdm(
@@ -317,6 +359,18 @@ def main(config: _config.TrainConfig):
             val_info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_val_info.items())
             pbar.write(f"Step {step}: {val_info_str}")
             wandb.log(reduced_val_info, step=step)
+
+        if val_iter is not None and action_val_interval is not None and step % action_val_interval == 0:
+            action_val_infos = []
+            with sharding.set_mesh(mesh):
+                for batch_index in range(action_val_num_batches):
+                    action_val_rng = jax.random.fold_in(train_rng, batch_index)
+                    action_val_infos.append(paction_val_step(action_val_rng, train_state, next(val_iter)))
+            stacked_action_val_infos = common_utils.stack_forest(action_val_infos)
+            reduced_action_val_info = jax.device_get(jax.tree.map(jnp.mean, stacked_action_val_infos))
+            action_val_info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_action_val_info.items())
+            pbar.write(f"Step {step}: {action_val_info_str}")
+            wandb.log(reduced_action_val_info, step=step)
         batch = next(data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
