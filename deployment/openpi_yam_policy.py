@@ -6,7 +6,8 @@ Launch with policy_deployment's server, for example:
         uv run python /path/to/policy_deployment/scripts/launch.py \
         --policy deployment.openpi_yam_policy:OpenPiYamPolicy \
         --policy-kwargs config=pi05_tower-of-hanoi-game_with_val_loss \
-        --policy-kwargs checkpoint_dir=checkpoints/pi05_tower-of-hanoi-game_with_val_loss/pi05_tower-of-hanoi-game_with_val_loss_2h200/40000
+        --policy-kwargs checkpoint_dir=checkpoints/pi05_tower-of-hanoi-game_with_val_loss/pi05_tower-of-hanoi-game_with_val_loss_2h200/40000 \
+        --policy-kwargs num_steps=10
 """
 
 from __future__ import annotations
@@ -49,16 +50,19 @@ class OpenPiYamPolicy(BasePolicy):
         default_prompt: str = "",
         policy_name: str | None = None,
         pytorch_device: str | None = None,
+        num_steps: int = 10,
     ) -> None:
         self._config_name = config
         self._checkpoint_dir = checkpoint_dir
         self._default_prompt = default_prompt
+        self._num_steps = int(num_steps)
         self._train_config = openpi_config.get_config(config)
         self._policy = policy_config.create_trained_policy(
             self._train_config,
             checkpoint_dir,
             default_prompt=default_prompt,
             pytorch_device=pytorch_device,
+            sample_kwargs={"num_steps": self._num_steps},
         )
         self._policy_name = policy_name or config
 
@@ -78,6 +82,7 @@ class OpenPiYamPolicy(BasePolicy):
             "extra": {
                 "openpi_config": self._config_name,
                 "checkpoint_dir": self._checkpoint_dir,
+                "num_steps": self._num_steps,
                 "action_layout": "[L_j1..6, L_gripper, R_j1..6, R_gripper]",
                 "gripper_range": "[0, 1]",
             },

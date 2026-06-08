@@ -13,7 +13,7 @@ uv run python third_party/policy_deployment/sim/check_in_sim.py \
   --scene third_party/policy_deployment/sim/assets/robot_models/arm/dual_yam/dual_yam_bimanual.xml \
   --host 127.0.0.1 \
   --port 8010 \
-  --prompt "play the tower of hanoi game" \
+  --prompt "Insert the battery into the mouse." \
   --action-horizon 50 \
   --output out/openpi_policy.mp4 \
   --render-camera front \
