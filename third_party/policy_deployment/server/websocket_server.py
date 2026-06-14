@@ -36,7 +36,8 @@ class WebsocketPolicyServer:
                           immediately rejected with 503 to limit DoS surface).
         max_message_size: Max bytes per inbound frame. None = unlimited.
                           Public-facing servers should set this (e.g. 16 MiB).
-        ping_interval:    Seconds between server-initiated pings (keepalive).
+        ping_interval:    Seconds between server-initiated pings. None disables
+                          WebSocket keepalive.
         ping_timeout:     Seconds to wait for pong before dropping connection.
     """
 
@@ -48,8 +49,8 @@ class WebsocketPolicyServer:
         auth: Optional[AuthConfig] = None,
         max_connections: int = 16,
         max_message_size: Optional[int] = 16 * 1024 * 1024,
-        ping_interval: float = 20.0,
-        ping_timeout: float = 20.0,
+        ping_interval: Optional[float] = None,
+        ping_timeout: Optional[float] = None,
     ) -> None:
         self._policy = policy
         self._host = host
@@ -61,6 +62,7 @@ class WebsocketPolicyServer:
         self._ping_timeout = ping_timeout
         self._active = 0
         self._active_lock = asyncio.Lock()
+        self._infer_count = 0
 
         logging.getLogger("websockets.server").setLevel(logging.INFO)
 
@@ -135,6 +137,7 @@ class WebsocketPolicyServer:
             self._active += 1
         remote = websocket.remote_address
         logger.info("Connection opened from %s (active=%d)", remote, self._active)
+        connection_infer_count = 0
 
         try:
             try:
@@ -165,6 +168,18 @@ class WebsocketPolicyServer:
                             "policy.infer must return dict with 'actions' key"
                         )
 
+                    connection_infer_count += 1
+                    self._infer_count += 1
+                    logger.info(
+                        "Inference completed for %s "
+                        "(connection_count=%d, total_count=%d, request_id=%r, infer_ms=%.1f)",
+                        remote,
+                        connection_infer_count,
+                        self._infer_count,
+                        obs.get("request_id"),
+                        infer_ms,
+                    )
+
                     timing = action.setdefault("server_timing", {})
                     timing["infer_ms"] = infer_ms
                     if prev_total_time is not None:
@@ -194,4 +209,9 @@ class WebsocketPolicyServer:
         finally:
             async with self._active_lock:
                 self._active -= 1
-            logger.info("Connection from %s ended (active=%d)", remote, self._active)
+            logger.info(
+                "Connection from %s ended (active=%d, inference_count=%d)",
+                remote,
+                self._active,
+                connection_infer_count,
+            )
